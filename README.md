@@ -1,16 +1,17 @@
-# eMySQL
+# emysql
 
-Asynchronous Erlang Client Driver
+Asynchronous Erlang MySQL Client.
 
 # Compile with Rebar
 
-* compile rebar
-git clone https://github.com/basho/rebar
-cd rebar
-./bootstrap
+compile rebar:
 
-* compile eMySQL
+* git clone https://github.com/basho/rebar
+* cd rebar
+* ./bootstrap
 
-cp rebar eMySQL/
-cd eMySQL
-./rebar compile
+compile emysql
+
+* cp rebar emysql/
+* cd emysql
+*./rebar compile
