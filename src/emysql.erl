@@ -13,8 +13,6 @@
 
 -include("emysql.hrl").
 
--import(extbif, [to_binary/1]).
-
 -export([insert/2, 
         select/1, 
         select/2, 
@@ -40,7 +38,6 @@ insert(Tab0, Record) ->
 	Fields = string:join([atom_to_list(F) || {F, _} <- Record], ","),
 	Values = string:join([encode(V) || {_, V} <- Record], ","),
     Query = ["insert into ", Tab, "(", Fields, ") values(", Values, ");"],
-    %?INFO("~p", [list_to_binary(Query)]),
     sql_query(list_to_binary(Query)).
 
 select(Tab) ->
@@ -65,11 +62,11 @@ select(Tab0, Fields0, Where0) ->
 	sql_query(list_to_binary(Query)).
 
 update(Tab, Record) ->
-	case dataset:get_value(id, Record) of 
-    {value, Id} ->
-        update(Tab, dataset:key_delete(id, Record), {id, Id});
-    {false, _} ->
-        {error, no_id_found}
+	case proplists:get_value(id, Record) of 
+    undefined ->
+        {error, no_id_found};
+    Id ->
+        update(Tab, lists:keydelete(id, 1, Record), {id, Id})
 	end.
 
 update(Tab0, Record, Where0) ->
@@ -95,8 +92,11 @@ delete(Tab0, Where0) when is_tuple(Where0) ->
     Query = ["delete from ", Tab, " where ", Where],
 	sql_query(list_to_binary(Query)).
 
-sql_query(Query) ->
-	case catch mysql_to_odbc(emysql_conn:sql_query(to_binary(Query))) of
+sql_query(Query) when is_list(Query) ->
+	sql_query(list_to_binary(Query));
+
+sql_query(Query) when is_binary(Query) ->
+	case catch mysql_to_odbc(emysql_conn:sql_query(Query)) of
     {selected, NewFields, Records} -> 
         {ok, to_tuple_records(NewFields, Records)};
     {error, Reason} -> 
@@ -105,14 +105,24 @@ sql_query(Query) ->
         Res
 	end.
 
-prepare(Name, Stmt) ->
+prepare(Name, Stmt) when is_list(Stmt) ->
+	prepare(Name, list_to_binary(Stmt));
+
+prepare(Name, Stmt) when is_binary(Stmt) ->
     emysql_conn:prepare(Name, Stmt).
 
 execute(Name) ->
     emysql_conn:execute(Name, []).
 
 execute(Name, Params) ->
-    emysql_conn:execute(Name, Params).
+	case catch mysql_to_odbc(emysql_conn:execute(Name, Params)) of
+    {selected, NewFields, Records} -> 
+        {ok, to_tuple_records(NewFields, Records)};
+    {error, Reason} -> 
+        {error, Reason};
+    Res ->
+        Res
+	end.
 
 unprepare(Name) ->
     emysql_conn:unprepare(Name).

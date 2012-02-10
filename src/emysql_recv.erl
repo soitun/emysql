@@ -31,14 +31,16 @@
 %%--------------------------------------------------------------------
 %% External exports (should only be used by the 'mysql_conn' module)
 %%--------------------------------------------------------------------
--export([start_link/3]).
+-export([start_link/2]).
+
+%callback
+-export([init/3]).
 
 -record(state, {
-	  socket,
-	  parent,
-	  log_fun,
-	  data
-	 }).
+		socket,
+		parent,
+		log_fun,
+		data}).
 
 -define(SECURE_CONNECTION, 32768).
 
@@ -58,23 +60,8 @@
 %%           Socket  = term(), gen_tcp socket
 %%           Reason  = atom() | string()
 %%--------------------------------------------------------------------
-start_link(Host, Port, Parent) when is_list(Host), is_integer(Port) ->
-    RecvPid =
-	spawn_link(fun () ->
-			   init(Host, Port, Parent)
-		   end),
-    %% wait for the socket from the spawned pid
-    receive
-	{mysql_recv, RecvPid, init, {error, E}} ->
-	    {error, E};
-	{mysql_recv, RecvPid, init, {ok, Socket}} ->
-	    {ok, RecvPid, Socket}
-    after ?CONNECT_TIMEOUT ->
-	    catch exit(RecvPid, kill),
-	    {error, "timeout"}
-    end.
-
-
+start_link(Host, Port) ->
+	proc_lib:start_link(?MODULE, init, [self(), Host, Port]).
 
 %%--------------------------------------------------------------------
 %% Function: init((Host, Port, Parent)
@@ -84,20 +71,15 @@ start_link(Host, Port, Parent) when is_list(Host), is_integer(Port) ->
 %% Descrip.: Connect to Host:Port and then enter receive-loop.
 %% Returns : error | never returns
 %%--------------------------------------------------------------------
-init(Host, Port, Parent) ->
+init(Parent, Host, Port) ->
     case gen_tcp:connect(Host, Port, [binary, {packet, 0}]) of
 	{ok, Sock} ->
-	    Parent ! {mysql_recv, self(), init, {ok, Sock}},
-	    State = #state{socket  = Sock,
-			   parent  = Parent,
-			   data    = <<>>
-			  },
-	    loop(State);
-	E ->
-	    %?ERROR("emysql_recv: Failed connecting to ~p:~p : ~p", [Host, Port, E]),
-	    Msg = lists:flatten(io_lib:format("connect failed : ~p", [E])),
-	    Parent ! {mysql_recv, self(), init, {error, Msg}}
-    end.
+		proc_lib:init_ack(Parent, {ok, self(), Sock}),
+		io:format("emysql_recv started...~n"),
+		loop(#state{socket = Sock, parent = Parent, data = <<>>});
+	{error, Reason} ->
+		proc_lib:init_ack(Parent, {error, Reason})
+	end.
 
 %%--------------------------------------------------------------------
 %% Function: loop(State)
@@ -115,13 +97,13 @@ loop(State) ->
 	    Rest = sendpacket(State#state.parent, NewData),
 	    loop(State#state{data = Rest});
 	{tcp_error, Sock, Reason} ->
-        %?ERROR("emysql_recv: Socket ~p closed : ~p", [Sock, Reason]),
 	    State#state.parent ! {mysql_recv, self(), closed, {error, Reason}},
 	    error;
 	{tcp_closed, Sock} ->
-        %?ERROR("emysql_recv: Socket ~p closed", [Sock]),
 	    State#state.parent ! {mysql_recv, self(), closed, normal},
-	    error
+	    error;
+	_Other -> %maybe system message
+		loop(State)
     end.
 
 %%--------------------------------------------------------------------

@@ -11,38 +11,38 @@
 
 -include("emysql.hrl").
 
+-import(proplists, [get_value/2, get_value/3]).
+
 -behaviour(gen_server).
 
 %% External exports
 -export([start_link/1,
-	 sql_query/1,
-	 sql_query/2,
-	 prepare/2,
-	 execute/2,
-	 execute/3,
-	 unprepare/1
-	]).
+		sql_query/1,
+		sql_query/2,
+		prepare/2,
+		execute/2,
+		execute/3,
+		unprepare/1]).
 
 %% Callback
 -export([init/1, 
-        handle_call/3, 
-        handle_cast/2, 
-        handle_info/2, 
-        terminate/2, 
-        code_change/3]).
+		handle_call/3, 
+		handle_cast/2, 
+		handle_info/2, 
+		terminate/2, 
+		code_change/3]).
 
 -record(state, {
-	  host,		
-	  port,	
-	  user,
-	  password,	
-	  database,
-	  encoding,
-	  mysql_version,
-	  recv_pid,
-	  socket,
-	  data
-	 }).
+		host,		
+		port,	
+		user,
+		password,	
+		database,
+		encoding,
+		mysql_version,
+		recv_pid,
+		socket,
+		data}).
 
 %%-define(KEEPALIVE_QUERY, <<"SELECT 1;">>).
 
@@ -53,7 +53,7 @@
 %CALL > CONNECT
 -define(CALL_TIMEOUT, 200000).
 
--define(CONNECT_TIMEOUT, 200000).
+-define(CONNECT_TIMEOUT, 180000).
 
 -define(MYSQL_4_0, 40). %% Support for MySQL 4.0.x
 
@@ -102,7 +102,7 @@ sql_query(Query, Timeout)  ->
     call({sql_query, Query}, Timeout).
 
 prepare(Name, Stmt) ->
-    cast({prepare, Name, Stmt}).
+    multicall({prepare, Name, Stmt}).
 
 execute(Name, Params) ->
     execute(Name, Params, ?CALL_TIMEOUT).
@@ -111,7 +111,7 @@ execute(Name, Params, Timeout) ->
     call({execute, Name, Params}, Timeout).
 
 unprepare(Name) ->
-    cast({unprepare, Name}).
+    multicall({unprepare, Name}).
 
 %%--------------------------------------------------------------------
 %% Function: init(Host, Port, User, Password, Database, Parent)
@@ -127,24 +127,23 @@ unprepare(Name) ->
 %% Returns : void() | does not return
 %%--------------------------------------------------------------------
 init([Opts]) ->
-    Host = proplists:get_value(host, Opts, "localhost"),
-    Port = proplists:get_value(port, Opts, 3306),
-    UserName = proplists:get_value(username, Opts, "root"),
-    Password = proplists:get_value(password, Opts, "public"),
-    Database = proplists:get_value(database, Opts),
-    Encoding = proplists:get_value(encoding, Opts, utf8),
-    pg2:create(mysql_conn),
-    pg2:join(mysql_conn, self()),
-    case emysql_recv:start_link(Host, Port, self()) of
+    Host = get_value(host, Opts, "localhost"),
+    Port = get_value(port, Opts, 3306),
+    UserName = get_value(username, Opts, "root"),
+    Password = get_value(password, Opts, "public"),
+    Database = get_value(database, Opts),
+    Encoding = get_value(encoding, Opts, utf8),
+	pg2:create(emysql_conn),
+	pg2:join(emysql_conn, self()),
+	case emysql_recv:start_link(Host, Port) of
 	{ok, RecvPid, Sock} ->
 	    case mysql_init(Sock, RecvPid, UserName, Password) of
 		{ok, Version} ->
 		    Db = iolist_to_binary(Database),
 		    case do_query(Sock, RecvPid, <<"use ", Db/binary>>, Version) of
 			{error, #mysql_result{error = Error} = _MySQLRes} ->
-			    %?ERROR("mysql_conn: Failed changing to database " "~p : ~p", [Database, Error]),
-                {stop, failed_using_database};
-			%% ResultType: data | updated
+			    error_logger:error_msg("emysql_conn: use '~p' error: ~p", [Database, Error]),
+                {stop, using_db_error};
 			{_ResultType, _MySQLRes} ->
                 EncodingBinary = list_to_binary(atom_to_list(Encoding)),
                 do_query(Sock, RecvPid, <<"set names '", EncodingBinary/binary, "'">>, Version),
@@ -155,21 +154,18 @@ init([Opts]) ->
                         password = Password,
                         database = Database, 
                         encoding = Encoding, 
-                        mysql_version=Version,
+                        mysql_version = Version,
                         recv_pid = RecvPid,
                         socket   = Sock,
-                        data     = <<>>
-                      },
-                %?PRINT("~nmysql connection is starting...[done]~n", []),
+                        data     = <<>>},
 			    {ok, State}
             end;
 		{error, Reason} ->
-            %?ERROR("mysql_conn init error: ~p", [Reason]),
-            {stop, login_failed}
+            {stop, {login_failed, Reason}}
         end;
-	_E ->
-        {stop, connect_failed}
-    end.
+	{error, Reason} ->
+		{stop, Reason}
+	end.
 
 handle_call({sql_query, Query}, _From, #state{socket = Socket, 
         recv_pid = RecvPid, mysql_version = Ver} = State)  ->
@@ -178,6 +174,25 @@ handle_call({sql_query, Query}, _From, #state{socket = Socket,
         {stop, mysql_timeout, Err, State};
     Res -> 
         {reply, Res, State}
+    end;
+
+handle_call({prepare, Name, Stmt}, _From, #state{socket = Socket, 
+	recv_pid = RecvPid, mysql_version = Ver} = State) ->
+
+    case do_prepare(Socket, RecvPid, Name, Stmt, Ver) of
+    {error, mysql_timeout} -> 
+        {stop, mysql_timeout, State};
+    _ ->
+        {reply, ok, State}
+    end;
+
+handle_call({unprepare, Name}, _From, #state{socket = Socket, 
+        recv_pid = RecvPid, mysql_version = Ver} = State) ->
+    case do_unprepare(Socket, RecvPid, Name, Ver) of
+    {error, mysql_timeout} -> 
+        {stop, mysql_timeout, State};
+    _ ->
+        {reply, ok, State}
     end;
 
 handle_call({execute, Name, Params}, _From, #state{socket = Socket, 
@@ -190,40 +205,22 @@ handle_call({execute, Name, Params}, _From, #state{socket = Socket,
     end;
 
 handle_call(Req, _From, State) ->
-    %?ERROR("unexpected req: ~p", [Req]),
-    {reply, {error, unexpected_req}, State}.
+    error_logger:error_msg("badreq to emysql_conn: ~p", [Req]),
+    {reply, {error, badreq}, State}.
 
-handle_cast({prepare, Name, Stmt}, #state{socket = Socket, recv_pid = RecvPid, mysql_version = Ver} = State) ->
-    case do_prepare(Socket, RecvPid, Name, Stmt, Ver) of
-    {error, mysql_timeout} -> 
-        {stop, mysql_timeout, State};
-    _ ->
-        {noreply, State}
-    end;
 
-handle_cast({unprepare, Name}, #state{socket = Socket, 
-        recv_pid = RecvPid, mysql_version = Ver} = State) ->
-    case do_unprepare(Socket, RecvPid, Name, Ver) of
-    {error, mysql_timeout} -> 
-        {stop, mysql_timeout, State};
-    _ ->
-        {noreply, State}
-    end;
-
-handle_cast(Msg, State) ->
-    %?ERROR("unexpected msg: ~p", [Msg]),
+handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info({mysql_recv, _RecvPid, data, _Packet, SeqNum}, State) ->
-    %?ERROR("unexpected mysql_recv: seq_num = ~p", [SeqNum]),
+    error_logger:error_msg("unexpected mysql_recv: seq_num = ~p", [SeqNum]),
     {noreply, State};
 
 handle_info({mysql_recv, _RecvPid, closed, E}, State) ->
-    %?ERROR("socket closed: ~p", [E]),
+    error_logger:error_msg("mysql socket closed: ~p", [E]),
     {stop, socket_closed, State};
 
-handle_info(Info, State) ->
-    %?ERROR("unexpected info : ~p", [Info]),
+handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, _State) ->
@@ -245,7 +242,7 @@ do_queries(Sock, RecvPid, Queries, Version) ->
 do_query(Sock, RecvPid, Query, Version) ->
     Query1 = iolist_to_binary(Query),
     %?DEBUG("sql_query ~p (id ~p)", [Query1, RecvPid]),
-    Packet =  <<?MYSQL_QUERY_OP, Query1/binary>>,
+    Packet = <<?MYSQL_QUERY_OP, Query1/binary>>,
     case do_send(Sock, Packet, 0) of
 	ok ->
 	    get_query_response(RecvPid, Version);
@@ -292,8 +289,8 @@ make_statements(Name, Params) ->
     ParamVals = lists:zip(ParamNums, Params),
     Stmts = lists:foldl(
 	      fun({Num, Val}, Acc) ->
-		      NumBin = mysql:encode(Num, true),
-		      ValBin = mysql:encode(Val, true),
+		      NumBin = emysql:encode(Num, true),
+		      ValBin = emysql:encode(Val, true),
 		      [<<"SET @", NumBin/binary, "=", ValBin/binary>> | Acc]
 	       end, [ExecStmt], lists:reverse(ParamVals)),
     Stmts.
@@ -355,11 +352,9 @@ mysql_init(Sock, RecvPid, User, Password) ->
 	    case AuthRes of
 		{ok, <<0:8, _Rest/binary>>, _RecvNum} ->
 		    {ok,Version};
-		{ok, <<255:8, Code:16/little, Message/binary>>, _RecvNum} ->
-		    %?ERROR("init error ~p: ~p", [Code, binary_to_list(Message)]),
+		{ok, <<255:8, _Code:16/little, Message/binary>>, _RecvNum} ->
 		    {error, binary_to_list(Message)};
 		{ok, RecvPacket, _RecvNum} ->
-		    %?ERROR("init unknown error ~p", [RecvPacket]),
 		    {error, binary_to_list(RecvPacket)};
 		{error, Reason} ->
 		    %?ERROR("init failed receiving data : ~p", [Reason]),
@@ -370,12 +365,12 @@ mysql_init(Sock, RecvPid, User, Password) ->
     end.
 
 greeting(Packet) ->
-    <<Protocol:8, Rest/binary>> = Packet,
+    <<_Protocol:8, Rest/binary>> = Packet,
     {Version, Rest2} = asciz(Rest),
     <<_TreadID:32/little, Rest3/binary>> = Rest2,
     {Salt, Rest4} = asciz(Rest3),
     <<Caps:16/little, Rest5/binary>> = Rest4,
-    <<ServerChar:16/binary-unit:8, Rest6/binary>> = Rest5,
+    <<_ServerChar:16/binary-unit:8, Rest6/binary>> = Rest5,
     {Salt2, _Rest7} = asciz(Rest6),
     %?DEBUG("greeting version ~p (protocol ~p) salt ~p caps ~p serverchar ~p"
 	  %"salt2 ~p",
@@ -500,10 +495,14 @@ do_recv(RecvPid, SeqNum) when is_integer(SeqNum) ->
     end.
 
 call(Req, Timeout) ->
-    gen_server:call(pg2:get_closest_pid(mysql_conn), Req, Timeout).
+    gen_server:call(pg2:get_closest_pid(emysql_conn), Req, Timeout).
 
-cast(Msg) ->
-    gen_server:cast(pg2:get_closest_pid(mysql_conn), Msg).
+multicall(Req) ->
+	Pids = pg2:get_local_members(emysql_conn),
+	[gen_server:call(Pid, Req) || Pid <- Pids].
+
+%cast(Msg) ->
+%    gen_server:cast(pg2:get_closest_pid(emysql_conn), Msg).
 
 %%--------------------------------------------------------------------
 %% Function: get_fields(RecvPid, [], Version)
@@ -656,7 +655,7 @@ normalize_version([$5|_T]) ->
 normalize_version([$6|_T]) ->
     %% MySQL version 6.x protocol is compliant with MySQL 4.1.x:
     ?MYSQL_4_1; 
-normalize_version(Other) ->
+normalize_version(_Other) ->
     %?ERROR("MySQL version '~p' not supported: MySQL Erlang module "
 	% "might not work correctly.", [Other]),
     %% Error, but trying the oldest protocol anyway:
