@@ -9,6 +9,6 @@
 		emysql_conn,
 		emysql_recv]},
   {registered, []},
-  {applications, [kernel, stdlib]},
+  {applications, [kernel, stdlib, sasl]},
   {env, []},
   {mod, {emysql_app, []}}]}.
