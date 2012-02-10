@@ -1,0 +1,9 @@
+{application,eMySQL,
+             [{description,[]},
+              {vsn,"1"},
+              {registered,[]},
+              {applications,[kernel,stdlib]},
+              {mod,{eMySQL_app,[]}},
+              {env,[]},
+              {modules,[eMySQL_app,eMySQL_sup,mysql,mysql_app,mysql_auth,
+                        mysql_conn,mysql_recv,mysql_sup]}]}.
