@@ -1,8 +1,8 @@
-# emysql
+# eMySQL
 
-Asynchronous Erlang MySQL Client.
+asynchronous erlang MySQL client.
 
-# Compile with Rebar
+## Compile with Rebar
 
 compile rebar:
 
