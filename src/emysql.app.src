@@ -1,8 +1,14 @@
-{application, mysql,
- [{description, "mysql"},
-  {vsn, "2.0"},
-  {modules, [mysql, mysql_app, mysql_sup, mysql_auth, mysql_conn, mysql_recv]},
-  {registered, [mysql]},
+{application, emysql,
+ [{description, "emysql"},
+  {vsn, "3.0"},
+  {modules, [
+		emysql,
+		emysql_app,
+		emysql_sup,
+		emysql_auth,
+		emysql_conn,
+		emysql_recv]},
+  {registered, []},
   {applications, [kernel, stdlib]},
   {env, []},
-  {mod, {mysql_app, []}}]}.
+  {mod, {emysql_app, []}}]}.

@@ -1,5 +1,5 @@
 %%%-------------------------------------------------------------------
-%%% File    : mysql_recv.erl
+%%% File    : emysql_recv.erl
 %%% Author  : Fredrik Thulin <ft@it.su.se>
 %%% Descrip.: Handles data being received on a MySQL socket. Decodes
 %%%           per-row framing and sends each row to parent.
@@ -26,9 +26,7 @@
 %%%             {mysql_recv, self(), init, {error, E}}
 %%%
 %%%-------------------------------------------------------------------
--module(mysql_recv).
-
--include("elog.hrl").
+-module(emysql_recv).
 
 %%--------------------------------------------------------------------
 %% External exports (should only be used by the 'mysql_conn' module)
@@ -96,7 +94,7 @@ init(Host, Port, Parent) ->
 			  },
 	    loop(State);
 	E ->
-	    ?ERROR("mysql_recv: Failed connecting to ~p:~p : ~p", [Host, Port, E]),
+	    %?ERROR("mysql_recv: Failed connecting to ~p:~p : ~p", [Host, Port, E]),
 	    Msg = lists:flatten(io_lib:format("connect failed : ~p", [E])),
 	    Parent ! {mysql_recv, self(), init, {error, Msg}}
     end.
@@ -117,11 +115,11 @@ loop(State) ->
 	    Rest = sendpacket(State#state.parent, NewData),
 	    loop(State#state{data = Rest});
 	{tcp_error, Sock, Reason} ->
-        ?ERROR("mysql_recv: Socket ~p closed : ~p", [Sock, Reason]),
+        %?ERROR("mysql_recv: Socket ~p closed : ~p", [Sock, Reason]),
 	    State#state.parent ! {mysql_recv, self(), closed, {error, Reason}},
 	    error;
 	{tcp_closed, Sock} ->
-        ?ERROR("mysql_recv: Socket ~p closed", [Sock]),
+        %?ERROR("mysql_recv: Socket ~p closed", [Sock]),
 	    State#state.parent ! {mysql_recv, self(), closed, normal},
 	    error
     end.

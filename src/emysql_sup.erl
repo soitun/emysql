@@ -1,5 +1,5 @@
 %%%----------------------------------------------------------------------
-%%% File    : mysql_sup.erl
+%%% File    : emysql_sup.erl
 %%% Author  : Ery Lee
 %%% Purpose : Mysql driver supervisor
 %%% Created : 21 May 2009 
@@ -8,7 +8,7 @@
 %%%
 %%% Copyright (C) 2007-2010, www.opengoss.com 
 %%%----------------------------------------------------------------------
--module(mysql_sup).
+-module(emysql_sup).
 
 -author('ery.lee@gmail.com').
 
@@ -24,6 +24,6 @@ init(Opts) ->
     PoolSize = proplists:get_value(pool_size, Opts, 4),
     Clients = [begin 
         Id = "mysql_conn_" ++ integer_to_list(I),
-        {Id, {mysql_conn, start_link, [Opts]}, permanent, 10, worker, [mysql_conn]}
+        {Id, {emysql_conn, start_link, [Opts]}, permanent, 5000, worker, [emysql_conn]}
     end || I <- lists:seq(1, PoolSize)], 
     {ok, {{one_for_one, 10, 100}, Clients}}.

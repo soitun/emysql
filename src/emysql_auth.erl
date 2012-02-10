@@ -1,4 +1,4 @@
--module(mysql_auth).
+-module(emysql_auth).
 
 -export([make_auth/2, make_new_auth/3, password_old/2, password_new/2]).
 

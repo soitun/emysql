@@ -1,5 +1,5 @@
 %%%----------------------------------------------------------------------
-%%% File    : mysql_conn.erl
+%%% File    : emysql_conn.erl
 %%% Author  : Ery Lee
 %%% Purpose : connection of mysql driver
 %%% Created : 11 Jan 2010 
@@ -7,11 +7,9 @@
 %%%
 %%% Copyright (C) 2007-2010, www.opengoss.com 
 %%%----------------------------------------------------------------------
--module(mysql_conn).
+-module(emysql_conn).
 
--include("elog.hrl").
-
--include("mysql.hrl").
+-include("emysql.hrl").
 
 -behaviour(gen_server).
 
@@ -144,7 +142,7 @@ init([Opts]) ->
 		    Db = iolist_to_binary(Database),
 		    case do_query(Sock, RecvPid, <<"use ", Db/binary>>, Version) of
 			{error, #mysql_result{error = Error} = _MySQLRes} ->
-			    ?ERROR("mysql_conn: Failed changing to database " "~p : ~p", [Database, Error]),
+			    %?ERROR("mysql_conn: Failed changing to database " "~p : ~p", [Database, Error]),
                 {stop, failed_using_database};
 			%% ResultType: data | updated
 			{_ResultType, _MySQLRes} ->
@@ -166,7 +164,7 @@ init([Opts]) ->
 			    {ok, State}
             end;
 		{error, Reason} ->
-            ?ERROR("mysql_conn init error: ~p", [Reason]),
+            %?ERROR("mysql_conn init error: ~p", [Reason]),
             {stop, login_failed}
         end;
 	_E ->
@@ -192,7 +190,7 @@ handle_call({execute, Name, Params}, _From, #state{socket = Socket,
     end;
 
 handle_call(Req, _From, State) ->
-    ?ERROR("unexpected req: ~p", [Req]),
+    %?ERROR("unexpected req: ~p", [Req]),
     {reply, {error, unexpected_req}, State}.
 
 handle_cast({prepare, Name, Stmt}, #state{socket = Socket, recv_pid = RecvPid, mysql_version = Ver} = State) ->
@@ -213,19 +211,19 @@ handle_cast({unprepare, Name}, #state{socket = Socket,
     end;
 
 handle_cast(Msg, State) ->
-    ?ERROR("unexpected msg: ~p", [Msg]),
+    %?ERROR("unexpected msg: ~p", [Msg]),
     {noreply, State}.
 
 handle_info({mysql_recv, _RecvPid, data, _Packet, SeqNum}, State) ->
-    ?ERROR("unexpected mysql_recv: seq_num = ~p", [SeqNum]),
+    %?ERROR("unexpected mysql_recv: seq_num = ~p", [SeqNum]),
     {noreply, State};
 
 handle_info({mysql_recv, _RecvPid, closed, E}, State) ->
-    ?ERROR("socket closed: ~p", [E]),
+    %?ERROR("socket closed: ~p", [E]),
     {stop, socket_closed, State};
 
 handle_info(Info, State) ->
-    ?ERROR("unexpected info : ~p", [Info]),
+    %?ERROR("unexpected info : ~p", [Info]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
@@ -246,7 +244,7 @@ do_queries(Sock, RecvPid, Queries, Version) ->
 
 do_query(Sock, RecvPid, Query, Version) ->
     Query1 = iolist_to_binary(Query),
-    ?DEBUG("sql_query ~p (id ~p)", [Query1, RecvPid]),
+    %?DEBUG("sql_query ~p (id ~p)", [Query1, RecvPid]),
     Packet =  <<?MYSQL_QUERY_OP, Query1/binary>>,
     case do_send(Sock, Packet, 0) of
 	ok ->
@@ -346,7 +344,7 @@ mysql_init(Sock, RecvPid, User, Password) ->
     case do_recv(RecvPid, undefined) of
 	{ok, Packet, InitSeqNum} ->
 	    {Version, Salt1, Salt2, Caps} = greeting(Packet),
-        ?DEBUG("version: ~p, ~p, ~p, ~p", [Version, Salt1, Salt2, Caps]),
+        %?DEBUG("version: ~p, ~p, ~p, ~p", [Version, Salt1, Salt2, Caps]),
 	    AuthRes =
 		case Caps band ?SECURE_CONNECTION of
         ?SECURE_CONNECTION ->
@@ -358,13 +356,13 @@ mysql_init(Sock, RecvPid, User, Password) ->
 		{ok, <<0:8, _Rest/binary>>, _RecvNum} ->
 		    {ok,Version};
 		{ok, <<255:8, Code:16/little, Message/binary>>, _RecvNum} ->
-		    ?ERROR("init error ~p: ~p", [Code, binary_to_list(Message)]),
+		    %?ERROR("init error ~p: ~p", [Code, binary_to_list(Message)]),
 		    {error, binary_to_list(Message)};
 		{ok, RecvPacket, _RecvNum} ->
-		    ?ERROR("init unknown error ~p", [RecvPacket]),
+		    %?ERROR("init unknown error ~p", [RecvPacket]),
 		    {error, binary_to_list(RecvPacket)};
 		{error, Reason} ->
-		    ?ERROR("init failed receiving data : ~p", [Reason]),
+		    %?ERROR("init failed receiving data : ~p", [Reason]),
 		    {error, Reason}
 	    end;
 	{error, Reason} ->
@@ -379,9 +377,9 @@ greeting(Packet) ->
     <<Caps:16/little, Rest5/binary>> = Rest4,
     <<ServerChar:16/binary-unit:8, Rest6/binary>> = Rest5,
     {Salt2, _Rest7} = asciz(Rest6),
-    ?DEBUG("greeting version ~p (protocol ~p) salt ~p caps ~p serverchar ~p"
-	  "salt2 ~p",
-	  [Version, Protocol, Salt, Caps, ServerChar, Salt2]),
+    %?DEBUG("greeting version ~p (protocol ~p) salt ~p caps ~p serverchar ~p"
+	  %"salt2 ~p",
+	  %[Version, Protocol, Salt, Caps, ServerChar, Salt2]),
     {normalize_version(Version), Salt, Salt2, Caps}.
 
 %% part of greeting/2
@@ -463,7 +461,7 @@ decode_length_binary(<<Len:8, Rest/binary>>) ->
         <<Val:64/little, Rest1/binary>> = Rest,
         {Val, Rest1};
     true ->
-        ?ERROR("affectedrows: ~p", [Len]),
+        %?ERROR("affectedrows: ~p", [Len]),
         {0, Rest}
     end.
 
@@ -648,7 +646,7 @@ do_send(Sock, Packet, SeqNum) when is_binary(Packet), is_integer(SeqNum) ->
 %% Returns : Version = string()
 %%--------------------------------------------------------------------
 normalize_version([$4,$.,$0|_T]) ->
-    ?DEBUG("switching to MySQL 4.0.x protocol.", []),
+    %?DEBUG("switching to MySQL 4.0.x protocol.", []),
     ?MYSQL_4_0;
 normalize_version([$4,$.,$1|_T]) ->
     ?MYSQL_4_1;
@@ -659,8 +657,8 @@ normalize_version([$6|_T]) ->
     %% MySQL version 6.x protocol is compliant with MySQL 4.1.x:
     ?MYSQL_4_1; 
 normalize_version(Other) ->
-    ?ERROR("MySQL version '~p' not supported: MySQL Erlang module "
-	 "might not work correctly.", [Other]),
+    %?ERROR("MySQL version '~p' not supported: MySQL Erlang module "
+	% "might not work correctly.", [Other]),
     %% Error, but trying the oldest protocol anyway:
     ?MYSQL_4_0.
 

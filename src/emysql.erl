@@ -1,19 +1,17 @@
 %%%----------------------------------------------------------------------
-%%% File    : mysql.erl
+%%% File    : emysql.erl
 %%% Author  : Ery Lee <ery.lee@gmail.com>
 %%% Purpose : Mysql access api.
 %%% Created : 19 May 2009
-%%% License : http://www.opengoss.com/license
+%%% License : http://www.opengoss.com
 %%%
-%%% Copyright (C) 2007-2009, www.opengoss.com 
+%%% Copyright (C) 2012, www.opengoss.com 
 %%%----------------------------------------------------------------------
--module(mysql).
+-module(emysql).
 
 -author('ery.lee@gmail.com').
 
--include("elog.hrl").
-
--include("mysql.hrl").
+-include("emysql.hrl").
 
 -import(extbif, [to_binary/1]).
 
@@ -42,7 +40,7 @@ insert(Tab0, Record) ->
 	Fields = string:join([atom_to_list(F) || {F, _} <- Record], ","),
 	Values = string:join([encode(V) || {_, V} <- Record], ","),
     Query = ["insert into ", Tab, "(", Fields, ") values(", Values, ");"],
-    ?INFO("~p", [list_to_binary(Query)]),
+    %?INFO("~p", [list_to_binary(Query)]),
     sql_query(list_to_binary(Query)).
 
 select(Tab) ->
