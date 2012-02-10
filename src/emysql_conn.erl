@@ -135,7 +135,7 @@ init([Opts]) ->
     Encoding = proplists:get_value(encoding, Opts, utf8),
     pg2:create(mysql_conn),
     pg2:join(mysql_conn, self()),
-    case mysql_recv:start_link(Host, Port, self()) of
+    case emysql_recv:start_link(Host, Port, self()) of
 	{ok, RecvPid, Sock} ->
 	    case mysql_init(Sock, RecvPid, UserName, Password) of
 		{ok, Version} ->
@@ -306,20 +306,20 @@ atom_to_binary(Val) ->
 %% authentication
 %%--------------------------------------------------------------------
 do_old_auth(Sock, RecvPid, SeqNum, User, Password, Salt1) ->
-    Auth = mysql_auth:password_old(Password, Salt1),
-    Packet = mysql_auth:make_auth(User, Auth),
+    Auth = emysql_auth:password_old(Password, Salt1),
+    Packet = emysql_auth:make_auth(User, Auth),
     do_send(Sock, Packet, SeqNum),
     do_recv(RecvPid, SeqNum).
 
 do_new_auth(Sock, RecvPid, SeqNum, User, Password, Salt1, Salt2) ->
-    Auth = mysql_auth:password_new(Password, Salt1 ++ Salt2),
-    Packet2 = mysql_auth:make_new_auth(User, Auth, none),
+    Auth = emysql_auth:password_new(Password, Salt1 ++ Salt2),
+    Packet2 = emysql_auth:make_new_auth(User, Auth, none),
     do_send(Sock, Packet2, SeqNum),
     case do_recv(RecvPid, SeqNum) of
     {ok, Packet3, SeqNum2} ->
         case Packet3 of
         <<254:8>> ->
-            AuthOld = mysql_auth:password_old(Password, Salt1),
+            AuthOld = emysql_auth:password_old(Password, Salt1),
             do_send(Sock, <<AuthOld/binary, 0:8>>, SeqNum2 + 1),
             do_recv(RecvPid, SeqNum2 + 1);
         _ -> 

@@ -96,7 +96,7 @@ delete(Tab0, Where0) when is_tuple(Where0) ->
 	sql_query(list_to_binary(Query)).
 
 sql_query(Query) ->
-	case catch mysql_to_odbc(mysql_conn:sql_query(to_binary(Query))) of
+	case catch mysql_to_odbc(emysql_conn:sql_query(to_binary(Query))) of
     {selected, NewFields, Records} -> 
         {ok, to_tuple_records(NewFields, Records)};
     {error, Reason} -> 
@@ -106,16 +106,16 @@ sql_query(Query) ->
 	end.
 
 prepare(Name, Stmt) ->
-    mysql_conn:prepare(Name, Stmt).
+    emysql_conn:prepare(Name, Stmt).
 
 execute(Name) ->
-    mysql_conn:execute(Name, []).
+    emysql_conn:execute(Name, []).
 
 execute(Name, Params) ->
-    mysql_conn:execute(Name, Params).
+    emysql_conn:execute(Name, Params).
 
 unprepare(Name) ->
-    mysql_conn:unprepare(Name).
+    emysql_conn:unprepare(Name).
 
 %% Convert MySQL query result to Erlang ODBC result formalism
 mysql_to_odbc({updated, #mysql_result{affectedrows=AffectedRows, insert_id = InsertId} = _MySQLRes}) ->

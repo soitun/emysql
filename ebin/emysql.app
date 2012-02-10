@@ -4,6 +4,6 @@
               {modules,[emysql,emysql_app,emysql_auth,emysql_conn,emysql_recv,
                         emysql_sup]},
               {registered,[]},
-              {applications,[kernel,stdlib]},
+              {applications,[kernel,stdlib,sasl,crypto]},
               {env,[]},
               {mod,{emysql_app,[]}}]}.
