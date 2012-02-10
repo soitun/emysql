@@ -1,0 +1,9 @@
+{application,emysql,
+             [{description,"emysql"},
+              {vsn,"3.0"},
+              {modules,[emysql,emysql_app,emysql_auth,emysql_conn,emysql_recv,
+                        emysql_sup]},
+              {registered,[]},
+              {applications,[kernel,stdlib]},
+              {env,[]},
+              {mod,{emysql_app,[]}}]}.
