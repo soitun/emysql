@@ -22,4 +22,4 @@ compile emysql
 
 ## Todo
 
-worker loader.
+if emysql crash, it cannot work!

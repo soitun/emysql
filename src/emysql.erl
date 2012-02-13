@@ -13,19 +13,45 @@
 
 -include("emysql.hrl").
 
--export([insert/2, 
-        select/1, 
-        select/2, 
-        select/3, 
-        update/2, 
-        update/3, 
-        delete/1, 
+-export([start_link/0]).
+
+-ifdef(use_specs).
+
+-spec(conns/0 :: () -> list()).
+
+-endif.
+
+-export([info/0,
+		add_conn/2,
+		conns/0,
+		insert/2,
+        select/1,
+        select/2,
+        update/2,
+        update/3,
+        delete/1,
         delete/2,
         prepare/2,
         execute/1,
         execute/2,
         unprepare/1,
-        sql_query/1]).
+        sqlquery/1,
+		sqlquery/2]).
+
+-behavior(gen_server2).
+
+-export([init/1,
+		prioritise_call/3,
+        handle_call/3,
+		prioritise_cast/2,
+        handle_cast/2,
+        handle_info/2,
+        terminate/2,
+        code_change/3]).
+
+-record(mysql_conn, {id, pid, load = 0, ref}).
+
+-record(state, {}).
 
 %% External exports
 -export([encode/1,
@@ -33,33 +59,56 @@
         escape/1,
 	    escape_like/1]).
 
-insert(Tab0, Record) ->
-    Tab = atom_to_list(Tab0),
-	Fields = string:join([atom_to_list(F) || {F, _} <- Record], ","),
-	Values = string:join([encode(V) || {_, V} <- Record], ","),
-    Query = ["insert into ", Tab, "(", Fields, ") values(", Values, ");"],
-    sql_query(list_to_binary(Query)).
+start_link() ->
+	gen_server2:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-select(Tab) ->
-	select(Tab, ['*'], undefined).
+info() ->
+	[{Conn#mysql_conn.id, Conn#mysql_conn.load} || Conn <- conns()].
 
-select(Tab, Fields) when is_list(Fields) ->
-    select(Tab, Fields, undefined);
+conns() ->
+	gen_server2:call(?MODULE, conns).
 
-select(Tab, Where) when is_tuple(Where) ->
-	select(Tab, ['*'], Where).
+add_conn(Id, Pid) ->
+	gen_server2:call(?MODULE, {add_conn, Id, Pid}).
 
-select(Tab0, Fields0, Where0) ->
-    Tab = atom_to_list(Tab0),
-    Fields = string:join([atom_to_list(F) || F <- Fields0], " ,"),
-	Query = case Where0 of
-    undefined -> 
-        ["select ", Fields, " from ", Tab, ";"];
-    Where0 -> 
-        Where = encode_where(Where0),
-        ["select ", Fields, " from ", Tab, " where ", Where, ";"]
-	end,
-	sql_query(list_to_binary(Query)).
+insert(Tab, Record) when is_atom(Tab) ->
+	sqlquery(encode_insert(Tab, Record)).
+
+encode_insert(Tab, Record) ->
+	{Fields, Values} = lists:unzip([{atom_to_list(F), encode(V)} 
+		|| {F, V} <- Record]),
+	["insert into ", atom_to_list(Tab), "(",
+		 string:join(Fields, ","), ") values(",
+		 string:join(Values, ","), ");"].
+
+select(Select) ->
+	sqlquery(encode_select(Select)).
+
+select(Select, Load) ->
+	sqlquery(encode_select(Select), Load).
+
+encode_select(Tab) when is_atom(Tab) ->
+	encode_select({Tab, ['*'], undefined});
+
+encode_select({Tab, Fields}) when is_atom(Tab) 
+	and is_list(Fields) ->
+    encode_select({Tab, Fields, undefined});
+
+encode_select({Tab, Where}) when is_atom(Tab) 
+	and is_tuple(Where) ->
+	encode_select({Tab, ['*'], Where});
+
+encode_select({Tab, Fields, undefined}) when is_atom(Tab) 
+	and is_list(Fields) ->
+	["select ", encode_fields(Fields), " from ", atom_to_list(Tab), ";"];
+
+encode_select({Tab, Fields, Where}) when is_atom(Tab) 
+	and is_list(Fields) and is_tuple(Where) ->
+	["select ", encode_fields(Fields), " from ",
+	 atom_to_list(Tab), " where ", encode_where(Where), ";"].
+
+encode_fields(Fields) ->
+    string:join([atom_to_list(F) || F <- Fields], " ,").
 
 update(Tab, Record) ->
 	case proplists:get_value(id, Record) of 
@@ -69,63 +118,214 @@ update(Tab, Record) ->
         update(Tab, lists:keydelete(id, 1, Record), {id, Id})
 	end.
 
-update(Tab0, Record, Where0) ->
-    Tab = atom_to_list(Tab0),
-    Where = encode_where(Where0),
+update(Tab, Record, Where) ->
 	Update = string:join([atom_to_list(F) ++ "=" ++ encode(V) || {F, V} <- Record], ","),
-    Query = ["update ", Tab, " set ", Update, " where ", Where, ";"],
-	sql_query(list_to_binary(Query)).
+    Query = ["update ", atom_to_list(Tab), " set ", Update, " where ", encode_where(Where), ";"],
+	sqlquery(Query).
 
-delete(Tab) ->
-    Query = ["delete from ", atom_to_list(Tab), ";"],
-	sql_query(list_to_binary(Query)).
+delete(Tab) when is_atom(Tab) ->
+	sqlquery(["delete from ", atom_to_list(Tab), ";"]).
 
-delete(Tab0, Id) when is_integer(Id) ->
-    Tab = atom_to_list(Tab0),
-    Where = encode_where({id, Id}),
-    Query = ["delete from ", Tab, " where ", Where],
-	sql_query(list_to_binary(Query));
+delete(Tab, Id) when is_atom(Tab)
+	and is_integer(Id) ->
+    Query = ["delete from ", atom_to_list(Tab), 
+			 " where ", encode_where({id, Id})],
+	sqlquery(Query);
 
-delete(Tab0, Where0) when is_tuple(Where0) ->
-    Tab = atom_to_list(Tab0),
-    Where = encode_where(Where0),
-    Query = ["delete from ", Tab, " where ", Where],
-	sql_query(list_to_binary(Query)).
+delete(Tab, Where) when is_atom(Tab)
+	and is_tuple(Where) ->
+    Query = ["delete from ", atom_to_list(Tab),
+			 " where ", encode_where(Where)],
+	sqlquery(Query).
 
-sql_query(Query) when is_list(Query) ->
-	sql_query(list_to_binary(Query));
+sqlquery(Query) ->
+	sqlquery(Query, 1).
 
-sql_query(Query) when is_binary(Query) ->
-	case catch mysql_to_odbc(emysql_conn:sql_query(Query)) of
-    {selected, NewFields, Records} -> 
-        {ok, to_tuple_records(NewFields, Records)};
-    {error, Reason} -> 
-        {error, Reason};
-    Res ->
-        Res
-	end.
+sqlquery(Query, Load) -> 
+	with_next_conn(fun(Conn) ->
+		case catch mysql_to_odbc(emysql_conn:sqlquery(Conn, iolist_to_binary(Query))) of
+		{selected, NewFields, Records} -> 
+			{ok, to_tuple_records(NewFields, Records)};
+		{error, Reason} -> 
+			{error, Reason};
+		Res ->
+			Res
+		end
+	end, Load).
 
 prepare(Name, Stmt) when is_list(Stmt) ->
 	prepare(Name, list_to_binary(Stmt));
 
 prepare(Name, Stmt) when is_binary(Stmt) ->
-    emysql_conn:prepare(Name, Stmt).
+	with_all_conns(fun(Conn) ->
+		emysql_conn:prepare(Conn, Name, Stmt)
+	end).
 
 execute(Name) ->
-    emysql_conn:execute(Name, []).
+	execute(Name, []).
 
 execute(Name, Params) ->
-	case catch mysql_to_odbc(emysql_conn:execute(Name, Params)) of
-    {selected, NewFields, Records} -> 
-        {ok, to_tuple_records(NewFields, Records)};
-    {error, Reason} -> 
-        {error, Reason};
-    Res ->
-        Res
-	end.
+	with_next_conn(fun(Conn) ->
+		case catch mysql_to_odbc(emysql_conn:execute(Conn, Name, Params)) of
+		{selected, NewFields, Records} -> 
+			{ok, to_tuple_records(NewFields, Records)};
+		{error, Reason} -> 
+			{error, Reason};
+		Res ->
+			Res
+		end
+	end, 1).
 
 unprepare(Name) ->
-    emysql_conn:unprepare(Name).
+	with_all_conns(fun(Conn) ->
+		emysql_conn:unprepare(Conn, Name)
+	end).
+
+with_next_conn(Fun, Load) ->
+	Conn = gen_server2:call(?MODULE, {next_conn, Load}),
+	if
+	Conn == undefined -> 
+		{error, no_mysql_conn};
+	true -> 
+		Result = Fun(Conn#mysql_conn.pid),
+		gen_server2:cast(?MODULE, {done, Conn#mysql_conn.id, Load}),
+		Result
+	end.
+
+with_all_conns(Fun) ->
+	[Fun(Conn#mysql_conn.pid) || Conn <- gen_server2:call(?MODULE, conns)].
+
+%%--------------------------------------------------------------------
+%% Function: init(Args) -> {ok, State} |
+%%                         {ok, State, Timeout} |
+%%                         ignore               |
+%%                         {stop, Reason}
+%% Description: Initiates the server
+%%--------------------------------------------------------------------
+init([]) ->
+	ets:new(mysql_conn, [set, protected, named_table, {keypos, 2}]),
+    {ok, #state{}}.
+
+%%--------------------------------------------------------------------
+%% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
+%%                                      {reply, Reply, State, Timeout} |
+%%                                      {noreply, State} |
+%%                                      {noreply, State, Timeout} |
+%%                                      {stop, Reason, Reply, State} |
+%%                                      {stop, Reason, State}
+%% Description: Handling call messages
+%%--------------------------------------------------------------------
+prioritise_call({add_conn, _Id, _Pid}, _From, _State) ->
+	10;
+prioritise_call(conns, _From, _State) ->
+	10;
+prioritise_call({next_conn, _Load}, _From, _State) ->
+	8;
+prioritise_call(_Req, _From, _State) ->
+	0.
+
+handle_call({add_conn, Id, Pid}, _From, State) ->
+	Ref = erlang:monitor(process, Pid),
+	ets:insert(mysql_conn, #mysql_conn{id = Id, pid = Pid, ref = Ref}),
+	{reply, ok, State};
+
+handle_call({next_conn, Load}, _From, State) ->
+	Conn = find_next_conn(ets:first(mysql_conn)),
+	case Conn of
+	undefined -> 
+		undefined;
+	_ -> 
+		OldLoad = Conn#mysql_conn.load,
+		NewConn = Conn#mysql_conn{load = OldLoad+Load},
+		ets:insert(mysql_conn, NewConn)
+	end,
+	{reply, Conn, State};
+	
+handle_call(conns, _From, State) ->
+	Conns = find_all_conns(ets:first(mysql_conn)),
+	{reply, Conns, State};
+
+handle_call(Req, From, State) ->
+    gen_server:reply(From, {badcall, Req}),
+    {stop, {badcall, Req}, State}.
+
+%%--------------------------------------------------------------------
+%% Function: handle_cast(Msg, State) -> {noreply, State} |
+%%                                      {noreply, State, Timeout} |
+%%                                      {stop, Reason, State}
+%% Description: Handling cast messages
+%%--------------------------------------------------------------------
+prioritise_cast(_Msg, _State) ->
+	0.
+
+handle_cast({done, ConnId, Load}, State) ->
+	case ets:lookup(mysql_conn, ConnId) of
+	[Conn] -> 
+		AllLoad = Conn#mysql_conn.load,	
+		ets:insert(mysql_conn, Conn#mysql_conn{load = AllLoad-Load});
+	[] ->
+		error_logger:error_msg("cannot find conn with id: ~p", [ConnId])
+	end,
+	{noreply, State};
+
+handle_cast(Msg, State) ->
+    {stop, {badcast, Msg}, State}.
+
+%%--------------------------------------------------------------------
+%% Function: handle_info(Info, State) -> {noreply, State} |
+%%                                       {noreply, State, Timeout} |
+%%                                       {stop, Reason, State}
+%% Description: Handling all non call/cast messages
+%%--------------------------------------------------------------------
+handle_info({'DOWN', MonitorRef, _Type, _Object, _Info}, State) ->
+	Matches = ets:match(mysql_conn, {mysql_conn, '$1', '_', '_', MonitorRef}),
+	[ets:delete(mysql_conn, Id) || [Id] <- Matches],
+	{noreply, State};
+
+handle_info(Info, State) ->
+    {stop, {badinfo, Info}, State}.
+
+%%--------------------------------------------------------------------
+%% Function: terminate(Reason, State) -> void()
+%% Description: This function is called by a gen_server when it is about to
+%% terminate. It should be the opposite of Module:init/1 and do any necessary
+%% cleaning up. When it returns, the gen_server terminates with Reason.
+%% The return value is ignored.
+%%--------------------------------------------------------------------
+terminate(_Reason, _State) ->
+    ok.
+%%--------------------------------------------------------------------
+%% Func: code_change(OldVsn, State, Extra) -> {ok, NewState}
+%% Description: Convert process state when code is changed
+%%--------------------------------------------------------------------
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+find_next_conn(Key) ->
+	find_next_conn(Key, undefined, -1).
+
+find_next_conn('$end_of_table', Conn, _Load) ->
+	Conn;
+find_next_conn(Key, Conn, Load) ->
+	[#mysql_conn{load = ThisLoad} = ThisConn] 
+		= ets:lookup(mysql_conn, Key),
+	NextKey = ets:next(mysql_conn, Key),
+	if
+	(Load == -1) or (ThisLoad =< Load) -> 
+		find_next_conn(NextKey, ThisConn, ThisLoad);
+	true ->
+		find_next_conn(NextKey, Conn, Load)
+	end.
+
+find_all_conns(Key) ->
+	find_all_conns(Key, []).
+
+find_all_conns('$end_of_table', Conns) ->
+	Conns;
+
+find_all_conns(Key, Conns) ->
+	[Conn] = ets:lookup(mysql_conn, Key),
+	find_all_conns(ets:next(mysql_conn, Key), [Conn|Conns]).
 
 %% Convert MySQL query result to Erlang ODBC result formalism
 mysql_to_odbc({updated, #mysql_result{affectedrows=AffectedRows, insert_id = InsertId} = _MySQLRes}) ->
@@ -285,3 +485,4 @@ quote([26 | Rest], Acc) ->
     quote(Rest, [$Z, $\\ | Acc]);
 quote([C | Rest], Acc) ->
     quote(Rest, [C | Acc]).
+

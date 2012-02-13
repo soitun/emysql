@@ -75,7 +75,6 @@ init(Parent, Host, Port) ->
     case gen_tcp:connect(Host, Port, [binary, {packet, 0}]) of
 	{ok, Sock} ->
 		proc_lib:init_ack(Parent, {ok, self(), Sock}),
-		io:format("emysql_recv started...~n"),
 		loop(#state{socket = Sock, parent = Parent, data = <<>>});
 	{error, Reason} ->
 		proc_lib:init_ack(Parent, {error, Reason})

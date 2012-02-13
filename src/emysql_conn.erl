@@ -5,7 +5,7 @@
 %%% Created : 11 Jan 2010 
 %%% License : http://www.opengoss.com
 %%%
-%%% Copyright (C) 2007-2010, www.opengoss.com 
+%%% Copyright (C) 2012, www.opengoss.com 
 %%%----------------------------------------------------------------------
 -module(emysql_conn).
 
@@ -16,13 +16,13 @@
 -behaviour(gen_server).
 
 %% External exports
--export([start_link/1,
-		sql_query/1,
-		sql_query/2,
-		prepare/2,
-		execute/2,
+-export([start_link/2,
+		sqlquery/2,
+		sqlquery/3,
+		prepare/3,
 		execute/3,
-		unprepare/1]).
+		execute/4,
+		unprepare/2]).
 
 %% Callback
 -export([init/1, 
@@ -67,11 +67,11 @@
 %%           Pid    = pid()
 %%           Reason = string()
 %%--------------------------------------------------------------------
-start_link(Opts) ->
-    gen_server:start_link(?MODULE, [Opts], []).
+start_link(Id, Opts) ->
+    gen_server:start_link(?MODULE, [Id, Opts], []).
 
 %%--------------------------------------------------------------------
-%% Function: sql_query(Query)
+%% Function: sqlquery(Query)
 %%           Queries   = A single binary() query or a list of binary() queries.
 %%                     If a list is provided, the return value is the return
 %%                     of the last query, or the first query that has
@@ -95,23 +95,23 @@ start_link(Opts) ->
 %%           Rows      = list() of [string()]
 %%           Reason    = term()
 %%--------------------------------------------------------------------
-sql_query(Query) ->
-    sql_query(Query, ?CALL_TIMEOUT).
+sqlquery(Conn, Query) ->
+    sqlquery(Conn, Query, ?CALL_TIMEOUT).
 
-sql_query(Query, Timeout)  ->
-    call({sql_query, Query}, Timeout).
+sqlquery(Conn, Query, Timeout)  ->
+    call(Conn, {sqlquery, Query}, Timeout).
 
-prepare(Name, Stmt) ->
-    multicall({prepare, Name, Stmt}).
+prepare(Conn, Name, Stmt) ->
+    call(Conn, {prepare, Name, Stmt}).
 
-execute(Name, Params) ->
-    execute(Name, Params, ?CALL_TIMEOUT).
+execute(Conn, Name, Params) ->
+    execute(Conn, Name, Params, ?CALL_TIMEOUT).
 
-execute(Name, Params, Timeout) ->
-    call({execute, Name, Params}, Timeout).
+execute(Conn, Name, Params, Timeout) ->
+    call(Conn, {execute, Name, Params}, Timeout).
 
-unprepare(Name) ->
-    multicall({unprepare, Name}).
+unprepare(Conn, Name) ->
+    call(Conn, {unprepare, Name}).
 
 %%--------------------------------------------------------------------
 %% Function: init(Host, Port, User, Password, Database, Parent)
@@ -126,15 +126,13 @@ unprepare(Name) ->
 %%           we were successfull.
 %% Returns : void() | does not return
 %%--------------------------------------------------------------------
-init([Opts]) ->
+init([Id, Opts]) ->
     Host = get_value(host, Opts, "localhost"),
     Port = get_value(port, Opts, 3306),
     UserName = get_value(username, Opts, "root"),
     Password = get_value(password, Opts, "public"),
     Database = get_value(database, Opts),
     Encoding = get_value(encoding, Opts, utf8),
-	pg2:create(emysql_conn),
-	pg2:join(emysql_conn, self()),
 	case emysql_recv:start_link(Host, Port) of
 	{ok, RecvPid, Sock} ->
 	    case mysql_init(Sock, RecvPid, UserName, Password) of
@@ -145,6 +143,7 @@ init([Opts]) ->
 			    error_logger:error_msg("emysql_conn: use '~p' error: ~p", [Database, Error]),
                 {stop, using_db_error};
 			{_ResultType, _MySQLRes} ->
+				emysql:add_conn(Id, self()),
                 EncodingBinary = list_to_binary(atom_to_list(Encoding)),
                 do_query(Sock, RecvPid, <<"set names '", EncodingBinary/binary, "'">>, Version),
                 State = #state{
@@ -167,7 +166,7 @@ init([Opts]) ->
 		{stop, Reason}
 	end.
 
-handle_call({sql_query, Query}, _From, #state{socket = Socket, 
+handle_call({sqlquery, Query}, _From, #state{socket = Socket, 
         recv_pid = RecvPid, mysql_version = Ver} = State)  ->
     case do_query(Socket, RecvPid, Query, Ver) of
     {error, mysql_timeout} = Err ->
@@ -208,7 +207,6 @@ handle_call(Req, _From, State) ->
     error_logger:error_msg("badreq to emysql_conn: ~p", [Req]),
     {reply, {error, badreq}, State}.
 
-
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -241,7 +239,7 @@ do_queries(Sock, RecvPid, Queries, Version) ->
 
 do_query(Sock, RecvPid, Query, Version) ->
     Query1 = iolist_to_binary(Query),
-    %?DEBUG("sql_query ~p (id ~p)", [Query1, RecvPid]),
+    %?DEBUG("sqlquery ~p (id ~p)", [Query1, RecvPid]),
     Packet = <<?MYSQL_QUERY_OP, Query1/binary>>,
     case do_send(Sock, Packet, 0) of
 	ok ->
@@ -494,15 +492,11 @@ do_recv(RecvPid, SeqNum) when is_integer(SeqNum) ->
         {error, mysql_timeout}
     end.
 
-call(Req, Timeout) ->
-    gen_server:call(pg2:get_closest_pid(emysql_conn), Req, Timeout).
+call(Conn, Req) ->
+    gen_server:call(Conn, Req).
 
-multicall(Req) ->
-	Pids = pg2:get_local_members(emysql_conn),
-	[gen_server:call(Pid, Req) || Pid <- Pids].
-
-%cast(Msg) ->
-%    gen_server:cast(pg2:get_closest_pid(emysql_conn), Msg).
+call(Conn, Req, Timeout) ->
+    gen_server:call(Conn, Req, Timeout).
 
 %%--------------------------------------------------------------------
 %% Function: get_fields(RecvPid, [], Version)

@@ -6,7 +6,7 @@
 %%% Updated : 11 Jan 2010 
 %%% License : http://www.opengoss.com
 %%%
-%%% Copyright (C) 2007-2010, www.opengoss.com 
+%%% Copyright (C) 2012, www.opengoss.com 
 %%%----------------------------------------------------------------------
 -module(emysql_sup).
 
@@ -22,8 +22,11 @@ start_link(Opts) ->
 
 init(Opts) ->
     PoolSize = proplists:get_value(pool_size, Opts, 4),
-    Clients = [begin 
-        Id = "mysql_conn_" ++ integer_to_list(I),
-        {Id, {emysql_conn, start_link, [Opts]}, permanent, 5000, worker, [emysql_conn]}
-    end || I <- lists:seq(1, PoolSize)], 
-    {ok, {{one_for_one, 10, 100}, Clients}}.
+    {ok, {{one_for_one, 10, 10},
+		  [{emysql, {emysql, start_link, []}, transient,
+            16#ffffffff, worker, [emysql]} |
+		   [{I, {emysql_conn, start_link, [I, Opts]}, transient, 16#ffffffff,
+			worker, [emysql_conn]} || I <- lists:seq(1, PoolSize)]]
+		}
+	}.
+	
