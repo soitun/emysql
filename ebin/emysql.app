@@ -2,7 +2,7 @@
              [{description,"emysql"},
               {vsn,"3.0"},
               {modules,[emysql,emysql_app,emysql_auth,emysql_conn,emysql_recv,
-                        emysql_sup]},
+                        emysql_sup,gen_server2,priority_queue]},
               {registered,[]},
               {applications,[kernel,stdlib,sasl,crypto]},
               {env,[]},

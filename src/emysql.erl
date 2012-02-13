@@ -21,7 +21,9 @@
 
 -endif.
 
--export([info/0,
+-export([
+		test/0,
+		info/0,
 		add_conn/2,
 		conns/0,
 		insert/2,
@@ -61,6 +63,9 @@
 
 start_link() ->
 	gen_server2:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+test() ->
+	gen_server2:call(?MODULE, test).
 
 info() ->
 	[{Conn#mysql_conn.id, Conn#mysql_conn.load} || Conn <- conns()].

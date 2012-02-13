@@ -1,4 +1,3 @@
-%%%----------------------------------------------------------------------
 %%% File    : emysql_conn.erl
 %%% Author  : Ery Lee
 %%% Purpose : connection of mysql driver
@@ -51,9 +50,9 @@
 -define(MYSQL_QUERY_OP, 3).
 
 %CALL > CONNECT
--define(CALL_TIMEOUT, 200000).
+-define(CALL_TIMEOUT, 2000). %200000).
 
--define(CONNECT_TIMEOUT, 180000).
+-define(CONNECT_TIMEOUT, 1000).%180000).
 
 -define(MYSQL_4_0, 40). %% Support for MySQL 4.0.x
 
