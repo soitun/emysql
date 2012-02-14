@@ -1,3 +1,5 @@
+# eMySQL
+
 Erlang MySQL client
 
 ## Compile with Rebar
