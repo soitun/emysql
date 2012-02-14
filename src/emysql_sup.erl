@@ -23,10 +23,10 @@ start_link(Opts) ->
 init(Opts) ->
     PoolSize = proplists:get_value(pool_size, Opts, 4),
     {ok, {{one_for_one, 10, 10},
-		  [{emysql, {emysql, start_link, []}, transient,
+		  [{emysql, {emysql, start_link, [PoolSize]}, transient,
             16#ffffffff, worker, [emysql]} |
 		   [{I, {emysql_conn, start_link, [I, Opts]}, transient, 16#ffffffff,
-			worker, [emysql_conn]} || I <- lists:seq(1, PoolSize)]]
+			worker, [emysql_conn, emysql_recv]} || I <- lists:seq(1, PoolSize)]]
 		}
 	}.
 	

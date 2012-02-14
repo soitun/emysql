@@ -13,7 +13,7 @@
 
 -include("emysql.hrl").
 
--export([start_link/0]).
+-export([start_link/1]).
 
 -ifdef(use_specs).
 
@@ -21,12 +21,13 @@
 
 -endif.
 
--export([
-		test/0,
-		info/0,
-		add_conn/2,
-		conns/0,
-		insert/2,
+%command functions
+-export([info/0,
+		pool/1,
+		conns/0]).
+
+%sql functions
+-export([insert/2,
         select/1,
         select/2,
         update/2,
@@ -51,9 +52,7 @@
         terminate/2,
         code_change/3]).
 
--record(mysql_conn, {id, pid, load = 0, ref}).
-
--record(state, {}).
+-record(state, {ids}).
 
 %% External exports
 -export([encode/1,
@@ -61,20 +60,18 @@
         escape/1,
 	    escape_like/1]).
 
-start_link() ->
-	gen_server2:start_link({local, ?MODULE}, ?MODULE, [], []).
-
-test() ->
-	gen_server2:call(?MODULE, test).
+start_link(PoolSize) ->
+	gen_server2:start_link({local, ?MODULE}, ?MODULE, [PoolSize], []).
 
 info() ->
-	[{Conn#mysql_conn.id, Conn#mysql_conn.load} || Conn <- conns()].
+	gen_server2:call(?MODULE, info).
+
+%pool pool
+pool(Id) ->
+	gen_server2:cast(?MODULE, {pool, Id}).
 
 conns() ->
 	gen_server2:call(?MODULE, conns).
-
-add_conn(Id, Pid) ->
-	gen_server2:call(?MODULE, {add_conn, Id, Pid}).
 
 insert(Tab, Record) when is_atom(Tab) ->
 	sqlquery(encode_insert(Tab, Record)).
@@ -115,7 +112,8 @@ encode_select({Tab, Fields, Where}) when is_atom(Tab)
 encode_fields(Fields) ->
     string:join([atom_to_list(F) || F <- Fields], " ,").
 
-update(Tab, Record) ->
+update(Tab, Record) when is_atom(Tab) 
+	and is_list(Record) ->
 	case proplists:get_value(id, Record) of 
     undefined ->
         {error, no_id_found};
@@ -124,9 +122,13 @@ update(Tab, Record) ->
 	end.
 
 update(Tab, Record, Where) ->
-	Update = string:join([atom_to_list(F) ++ "=" ++ encode(V) || {F, V} <- Record], ","),
-    Query = ["update ", atom_to_list(Tab), " set ", Update, " where ", encode_where(Where), ";"],
+	Update = string:join([encode_column(Col) || Col <- Record], ","),
+    Query = ["update ", atom_to_list(Tab), " set ", Update,
+		" where ", encode_where(Where), ";"],
 	sqlquery(Query).
+
+encode_column({F, V}) when is_atom(F) ->
+	lists:concat([atom_to_list(F), "=", encode(V)]).
 
 delete(Tab) when is_atom(Tab) ->
 	sqlquery(["delete from ", atom_to_list(Tab), ";"]).
@@ -188,17 +190,17 @@ unprepare(Name) ->
 
 with_next_conn(Fun, Load) ->
 	Conn = gen_server2:call(?MODULE, {next_conn, Load}),
-	if
-	Conn == undefined -> 
-		{error, no_mysql_conn};
-	true -> 
-		Result = Fun(Conn#mysql_conn.pid),
-		gen_server2:cast(?MODULE, {done, Conn#mysql_conn.id, Load}),
-		Result
+	case Conn of	
+	{Id, Pid} -> 
+		Result = Fun(Pid),
+		gen_server2:cast(?MODULE, {done, Id, Load}),
+		Result;
+	undefined -> 
+		{error, no_mysql_conn}
 	end.
 
 with_all_conns(Fun) ->
-	[Fun(Conn#mysql_conn.pid) || Conn <- gen_server2:call(?MODULE, conns)].
+	[Fun(Pid) || {_Id, Pid} <- gen_server2:call(?MODULE, conns)].
 
 %%--------------------------------------------------------------------
 %% Function: init(Args) -> {ok, State} |
@@ -207,9 +209,11 @@ with_all_conns(Fun) ->
 %%                         {stop, Reason}
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
-init([]) ->
-	ets:new(mysql_conn, [set, protected, named_table, {keypos, 2}]),
-    {ok, #state{}}.
+init([PoolSize]) ->
+	Ids = lists:seq(1, PoolSize),
+	[put(Id, 0) || Id <- Ids],
+	[put({count, Id}, 0) || Id <- Ids],
+    {ok, #state{ids = Ids}}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -220,7 +224,7 @@ init([]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-prioritise_call({add_conn, _Id, _Pid}, _From, _State) ->
+prioritise_call(info, _From, _State) ->
 	10;
 prioritise_call(conns, _From, _State) ->
 	10;
@@ -229,25 +233,35 @@ prioritise_call({next_conn, _Load}, _From, _State) ->
 prioritise_call(_Req, _From, _State) ->
 	0.
 
-handle_call({add_conn, Id, Pid}, _From, State) ->
-	Ref = erlang:monitor(process, Pid),
-	ets:insert(mysql_conn, #mysql_conn{id = Id, pid = Pid, ref = Ref}),
-	{reply, ok, State};
+handle_call(info, _From, State) ->
+	Reply = [{conn, Id, Pid, get(Id), get({total, Id})} 
+		|| {Id, Pid} <- get_all_conns()],
+	{reply, Reply, State};
 
-handle_call({next_conn, Load}, _From, State) ->
-	Conn = find_next_conn(ets:first(mysql_conn)),
-	case Conn of
+handle_call({next_conn, Load}, _From, #state{ids = Ids} = State) ->
+	{ConnId, ConnLoad} =
+	lists:foldl(fun(Id, {MinId, MinLoad}) -> 
+		ThisLoad = get(Id),
+		if
+		ThisLoad =< MinLoad -> {Id, ThisLoad};
+		true -> {MinId, MinLoad}
+		end
+	end, {undefined, 16#ffffffff}, Ids),
+	Reply =
+	case ConnId of
 	undefined -> 
 		undefined;
 	_ -> 
-		OldLoad = Conn#mysql_conn.load,
-		NewConn = Conn#mysql_conn{load = OldLoad+Load},
-		ets:insert(mysql_conn, NewConn)
+		ConnPid = get_conn_pid(ConnId),
+		put(ConnId, ConnLoad+Load),
+		Count = get({total, ConnId}),
+		put({total, ConnId}, Count+1),
+		{ConnId, ConnPid}
 	end,
-	{reply, Conn, State};
+	{reply, Reply, State};
 	
 handle_call(conns, _From, State) ->
-	Conns = find_all_conns(ets:first(mysql_conn)),
+	Conns = get_all_conns(),
 	{reply, Conns, State};
 
 handle_call(Req, From, State) ->
@@ -260,17 +274,20 @@ handle_call(Req, From, State) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
+prioritise_cast({pool, _Id}, _State) ->
+	10;
+prioritise_cast({done, _ConnId, _Load}, _State) ->
+	2;
 prioritise_cast(_Msg, _State) ->
 	0.
 
+handle_cast({pool, Id}, State) ->
+	put(Id, 0),
+	put({total, Id}, 0),
+	{noreply, State};
+
 handle_cast({done, ConnId, Load}, State) ->
-	case ets:lookup(mysql_conn, ConnId) of
-	[Conn] -> 
-		AllLoad = Conn#mysql_conn.load,	
-		ets:insert(mysql_conn, Conn#mysql_conn{load = AllLoad-Load});
-	[] ->
-		error_logger:error_msg("cannot find conn with id: ~p", [ConnId])
-	end,
+	put(ConnId, get(ConnId) - Load),
 	{noreply, State};
 
 handle_cast(Msg, State) ->
@@ -282,11 +299,6 @@ handle_cast(Msg, State) ->
 %%                                       {stop, Reason, State}
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
-handle_info({'DOWN', MonitorRef, _Type, _Object, _Info}, State) ->
-	Matches = ets:match(mysql_conn, {mysql_conn, '$1', '_', '_', MonitorRef}),
-	[ets:delete(mysql_conn, Id) || [Id] <- Matches],
-	{noreply, State};
-
 handle_info(Info, State) ->
     {stop, {badinfo, Info}, State}.
 
@@ -306,31 +318,18 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-find_next_conn(Key) ->
-	find_next_conn(Key, undefined, -1).
+get_conn_pid(CId) ->
+	[{CId, Pid, _Type, _Modules} | _] =
+	lists:dropwhile(fun ({Id, _Pid, _Type, _Modules})
+						  when Id =:= CId -> false;
+						(_)               -> true
+					end,
+					supervisor:which_children(emysql_sup)),
+	Pid.
 
-find_next_conn('$end_of_table', Conn, _Load) ->
-	Conn;
-find_next_conn(Key, Conn, Load) ->
-	[#mysql_conn{load = ThisLoad} = ThisConn] 
-		= ets:lookup(mysql_conn, Key),
-	NextKey = ets:next(mysql_conn, Key),
-	if
-	(Load == -1) or (ThisLoad =< Load) -> 
-		find_next_conn(NextKey, ThisConn, ThisLoad);
-	true ->
-		find_next_conn(NextKey, Conn, Load)
-	end.
-
-find_all_conns(Key) ->
-	find_all_conns(Key, []).
-
-find_all_conns('$end_of_table', Conns) ->
-	Conns;
-
-find_all_conns(Key, Conns) ->
-	[Conn] = ets:lookup(mysql_conn, Key),
-	find_all_conns(ets:next(mysql_conn, Key), [Conn|Conns]).
+get_all_conns() ->
+	[{Id, Pid} || {Id, Pid, _Type, _Modules} <- 
+		supervisor:which_children(emysql_sup), is_integer(Id)].
 
 %% Convert MySQL query result to Erlang ODBC result formalism
 mysql_to_odbc({updated, #mysql_result{affectedrows=AffectedRows, insert_id = InsertId} = _MySQLRes}) ->

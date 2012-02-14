@@ -20,6 +20,3 @@ compile emysql
 
 * http://forge.mysql.com/wiki/MySQL_Internals_ClientServer_Protocol
 
-## Todo
-
-if emysql crash, it cannot work!

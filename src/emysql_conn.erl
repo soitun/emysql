@@ -50,9 +50,9 @@
 -define(MYSQL_QUERY_OP, 3).
 
 %CALL > CONNECT
--define(CALL_TIMEOUT, 2000). %200000).
+-define(CALL_TIMEOUT, 301000).
 
--define(CONNECT_TIMEOUT, 1000).%180000).
+-define(CONNECT_TIMEOUT, 300000).
 
 -define(MYSQL_4_0, 40). %% Support for MySQL 4.0.x
 
@@ -142,7 +142,7 @@ init([Id, Opts]) ->
 			    error_logger:error_msg("emysql_conn: use '~p' error: ~p", [Database, Error]),
                 {stop, using_db_error};
 			{_ResultType, _MySQLRes} ->
-				emysql:add_conn(Id, self()),
+				emysql:pool(Id), %pool it
                 EncodingBinary = list_to_binary(atom_to_list(Encoding)),
                 do_query(Sock, RecvPid, <<"set names '", EncodingBinary/binary, "'">>, Version),
                 State = #state{

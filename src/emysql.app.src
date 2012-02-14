@@ -1,6 +1,6 @@
 {application, emysql,
  [{description, "emysql"},
-  {vsn, "3.0"},
+  {vsn, "3.0.1"},
   {modules, [
 		emysql,
 		emysql_app,
