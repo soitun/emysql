@@ -14,7 +14,7 @@ compile emysql
 
 * cp rebar emysql/
 * cd emysql
-*./rebar compile
+* ./rebar compile
 
 ## Select API
 
