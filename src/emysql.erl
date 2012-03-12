@@ -28,6 +28,7 @@
 
 %sql functions
 -export([insert/2,
+		insert/3,
         select/1,
         select/2,
         update/2,
@@ -76,12 +77,25 @@ conns() ->
 insert(Tab, Record) when is_atom(Tab) ->
 	sqlquery(encode_insert(Tab, Record)).
 
+insert(_Tab, _Fields, Values) when length(Values) == 0 ->
+    {updated, {0, 0}};
+
+insert(Tab, Fields, Values) when length(Values) > 0 ->
+	sqlquery(encode_insert(Tab, Fields, Values)).
+
 encode_insert(Tab, Record) ->
 	{Fields, Values} = lists:unzip([{atom_to_list(F), encode(V)} 
 		|| {F, V} <- Record]),
 	["insert into ", atom_to_list(Tab), "(",
 		 string:join(Fields, ","), ") values(",
 		 string:join(Values, ","), ");"].
+
+encode_insert(Tab, Fields, Rows) ->
+	Encode = fun(Row) -> string:join([encode(V) || V <- Row], ",") end,
+	Rows1 = [lists:concat(["(", Encode(Row), ")"]) || Row <- Rows],
+	["insert into ", atom_to_list(Tab), "(",
+		string:join([atom_to_list(F) || F <- Fields], ","), 
+		") values", string:join(Rows1, ","), ";"].
 
 select(Select) ->
 	sqlquery(encode_select(Select)).
