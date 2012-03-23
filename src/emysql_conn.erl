@@ -16,6 +16,7 @@
 
 %% External exports
 -export([start_link/2,
+		info/1,
 		sqlquery/2,
 		sqlquery/3,
 		prepare/3,
@@ -32,10 +33,11 @@
 		code_change/3]).
 
 -record(state, {
-		host,		
-		port,	
+		id,
+		host,
+		port,
 		user,
-		password,	
+		password,
 		database,
 		encoding,
 		mysql_version,
@@ -68,6 +70,9 @@
 %%--------------------------------------------------------------------
 start_link(Id, Opts) ->
     gen_server:start_link(?MODULE, [Id, Opts], []).
+
+info(Conn) ->
+	gen_server:call(Conn, info).
 
 %%--------------------------------------------------------------------
 %% Function: sqlquery(Query)
@@ -126,6 +131,7 @@ unprepare(Conn, Name) ->
 %% Returns : void() | does not return
 %%--------------------------------------------------------------------
 init([Id, Opts]) ->
+	put(queries, 0),
     Host = get_value(host, Opts, "localhost"),
     Port = get_value(port, Opts, 3306),
     UserName = get_value(username, Opts, "root"),
@@ -143,9 +149,12 @@ init([Id, Opts]) ->
                 {stop, using_db_error};
 			{_ResultType, _MySQLRes} ->
 				emysql:pool(Id), %pool it
+				pg2:create(emysql_conn),
+				pg2:join(emysql_conn, self()),
                 EncodingBinary = list_to_binary(atom_to_list(Encoding)),
                 do_query(Sock, RecvPid, <<"set names '", EncodingBinary/binary, "'">>, Version),
                 State = #state{
+						id = Id,
                         host = Host, 
                         port = Port, 
                         user = UserName, 
@@ -165,8 +174,13 @@ init([Id, Opts]) ->
 		{stop, Reason}
 	end.
 
+handle_call(info, _From, #state{id = Id} = State) ->
+	Reply = {Id, self(), get(queries)},
+	{reply, Reply, State};
+
 handle_call({sqlquery, Query}, _From, #state{socket = Socket, 
         recv_pid = RecvPid, mysql_version = Ver} = State)  ->
+	put(queries, get(queries) + 1),
     case do_query(Socket, RecvPid, Query, Ver) of
     {error, mysql_timeout} = Err ->
         {stop, mysql_timeout, Err, State};

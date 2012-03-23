@@ -65,7 +65,8 @@ start_link(PoolSize) ->
 	gen_server2:start_link({local, ?MODULE}, ?MODULE, [PoolSize], []).
 
 info() ->
-	gen_server2:call(?MODULE, info).
+	[emysql_conn:info(Pid) || Pid <- 
+		pg2:get_local_members(emysql_conn)].
 
 %pool pool
 pool(Id) ->
@@ -202,19 +203,23 @@ unprepare(Name) ->
 		emysql_conn:unprepare(Conn, Name)
 	end).
 
-with_next_conn(Fun, Load) ->
-	Conn = gen_server2:call(?MODULE, {next_conn, Load}),
-	case Conn of	
-	{Id, Pid} -> 
-		Result = Fun(Pid),
-		gen_server2:cast(?MODULE, {done, Id, Load}),
-		Result;
-	undefined -> 
-		{error, no_mysql_conn}
-	end.
+with_next_conn(Fun, _Load) ->
+	Fun(pg2:get_closest_pid(emysql_conn)).
+	
+
+%with_next_conn(Fun, Load) ->
+%	Conn = gen_server2:call(?MODULE, {next_conn, Load}),
+%	case Conn of	
+%	{Id, Pid} -> 
+%		Result = Fun(Pid),
+%		gen_server2:cast(?MODULE, {done, Id, Load}),
+%		Result;
+%	undefined -> 
+%		{error, no_mysql_conn}
+%	end.
 
 with_all_conns(Fun) ->
-	[Fun(Pid) || {_Id, Pid} <- gen_server2:call(?MODULE, conns)].
+	[Fun(Pid) || Pid <- pg2:get_local_members(emysql_conn)].
 
 %%--------------------------------------------------------------------
 %% Function: init(Args) -> {ok, State} |
