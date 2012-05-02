@@ -35,6 +35,7 @@
         update/3,
         delete/1,
         delete/2,
+		truncate/1,
         prepare/2,
         execute/1,
         execute/2,
@@ -159,6 +160,9 @@ delete(Tab, Where) when is_atom(Tab)
     Query = ["delete from ", atom_to_list(Tab),
 			 " where ", encode_where(Where)],
 	sqlquery(Query).
+
+truncate(Tab) when is_atom(Tab) ->
+	sqlquery(["truncate table ", atom_to_list(Tab), ";"]).
 
 sqlquery(Query) ->
 	sqlquery(Query, 1).
