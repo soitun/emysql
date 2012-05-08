@@ -382,8 +382,14 @@ mysql_item_to_odbc(Columns, Recs) ->
 encode_where({'and', L, R}) ->
 	encode_where(L) ++ " and " ++ encode_where(R);
 
+encode_where({'and', List}) when is_list(List) ->
+	string:join([encode_where(E) || E <- List], " and ");
+
 encode_where({'or', L, R}) ->
 	encode_where(L) ++ " or " ++ encode_where(R);
+
+encode_where({'or', List}) when is_list(List) ->
+	string:join([encode_where(E) || E <- List], " or ");
 
 encode_where({like, Field, Value}) ->	
 	atom_to_list(Field) ++ " like " ++ encode(Value);
