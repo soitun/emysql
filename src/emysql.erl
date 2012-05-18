@@ -100,6 +100,9 @@ encode_insert(Tab, Fields, Rows) ->
 		string:join([atom_to_list(F) || F <- Fields], ","), 
 		") values", string:join(Rows1, ","), ";"].
 
+select(Tab) when is_atom(Tab) ->
+	sqlquery(encode_select(Tab));
+
 select(Select) when is_tuple(Select) ->
 	sqlquery(encode_select(Select)).
 
