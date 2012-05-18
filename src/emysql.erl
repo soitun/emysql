@@ -31,6 +31,7 @@
 		insert/3,
         select/1,
         select/2,
+		select/3,
         update/2,
         update/3,
         delete/1,
@@ -99,11 +100,15 @@ encode_insert(Tab, Fields, Rows) ->
 		string:join([atom_to_list(F) || F <- Fields], ","), 
 		") values", string:join(Rows1, ","), ";"].
 
-select(Select) ->
+select(Select) when is_tuple(Select) ->
 	sqlquery(encode_select(Select)).
 
-select(Select, Load) ->
+select(Select, Load) when is_tuple(Select) and is_integer(Load) ->
 	sqlquery(encode_select(Select), Load).
+
+select(Tab, Fields, Where) when is_atom(Tab) 
+	and is_list(Fields) and is_tuple(Where) ->
+	sqlquery(encode_select({Tab, Fields, Where})).
 
 encode_select(Tab) when is_atom(Tab) ->
 	encode_select({Tab, ['*'], undefined});
