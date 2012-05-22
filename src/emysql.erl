@@ -100,7 +100,7 @@ encode_insert(Tab, Fields, Rows) ->
 		string:join([atom_to_list(F) || F <- Fields], ","), 
 		") values", string:join(Rows1, ","), ";"].
 
-select(Select) when is_tuple(Select) ->
+select(Select) ->
 	sqlquery(encode_select(Select)).
 
 select(Select, Load) when is_tuple(Select) and is_integer(Load) ->
