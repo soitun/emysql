@@ -106,6 +106,9 @@ select(Tab) when is_atom(Tab) ->
 select(Select) when is_tuple(Select) ->
 	sqlquery(encode_select(Select)).
 
+select(Tab, Where) when is_atom(Tab) and is_tuple(Where) ->
+	sqlquery(encode_select({Tab, Where}));
+
 select(Select, Load) when is_tuple(Select) and is_integer(Load) ->
 	sqlquery(encode_select(Select), Load).
 
